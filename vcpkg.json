@@ -1,0 +1,7 @@
+﻿{
+  "dependencies": [
+    {
+      "name": "opencv4"
+    }
+  ]
+}

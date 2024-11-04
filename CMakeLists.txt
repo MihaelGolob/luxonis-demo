@@ -5,5 +5,8 @@ add_subdirectory(lib/depthai-core EXCLUDE_FROM_ALL)
 
 project(luxonis_demo)
 
+find_package(OpenCV REQUIRED)
+
 add_executable(luxonis_demo main.cpp)
 target_link_libraries(luxonis_demo PRIVATE depthai::core)
+target_link_libraries(luxonis_demo PRIVATE ${OpenCV_LIBS})
