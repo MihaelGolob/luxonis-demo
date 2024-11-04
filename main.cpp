@@ -1,38 +1,91 @@
 #include <iostream>
-#include <depthai/depthai.hpp>
 #include <opencv2/opencv.hpp>
+#include <depthai/depthai.hpp>
+#include <pcl/pcl_base.h>
+#include <pcl/visualization/pcl_visualizer.h>
 
 int main() {
-    // Create pipeline
-    dai::Pipeline pipeline;
-    auto colorCam = pipeline.create<dai::node::ColorCamera>();
-    auto xlinkOut = pipeline.create<dai::node::XLinkOut>();
-    xlinkOut->setStreamName("preview");
-    colorCam->setInterleaved(true);
-    colorCam->preview.link(xlinkOut->input);
+    auto pipeline = dai::Pipeline();
+    auto monoLeft = pipeline.create<dai::node::MonoCamera>();
+    auto monoRight = pipeline.create<dai::node::MonoCamera>();
+    auto depth = pipeline.create<dai::node::StereoDepth>();
+    auto pointcloud = pipeline.create<dai::node::PointCloud>();
+    auto xout = pipeline.create<dai::node::XLinkOut>();
+    auto xoutDepth = pipeline.create<dai::node::XLinkOut>();
 
-    try {
-        // Try connecting to device and start the pipeline
-        dai::Device device(pipeline);
-        // Get output queue
-        auto preview = device.getOutputQueue("preview");
+    monoLeft->setResolution(dai::MonoCameraProperties::SensorResolution::THE_400_P);
+    monoLeft->setCamera("left");
+    monoRight->setResolution(dai::MonoCameraProperties::SensorResolution::THE_400_P);
+    monoRight->setCamera("right");
 
-        cv::Mat frame;
-        while (true) {
+    // Create a node that will produce the depth map (using disparity output as
+    // it's easier to visualize depth this way)
+    depth->setDefaultProfilePreset(dai::node::StereoDepth::PresetMode::HIGH_DENSITY);
+    // Options: MEDIAN_OFF, KERNEL_3x3, KERNEL_5x5, KERNEL_7x7 (default)
+    depth->initialConfig.setMedianFilter(dai::MedianFilter::KERNEL_7x7);
+    depth->setLeftRightCheck(true);
+    depth->setExtendedDisparity(false);
+    depth->setSubpixel(true);
 
-            // Receive 'preview' frame from device
-            auto imgFrame = preview->get<dai::ImgFrame>();
+    xout->setStreamName("out");
+    xoutDepth->setStreamName("depth");
 
-            // Show the received 'preview' frame
-            cv::imshow("preview", cv::Mat(imgFrame->getHeight(), imgFrame->getWidth(), CV_8UC3, imgFrame->getData().data()));
+    monoLeft->out.link(depth->left);
+    monoRight->out.link(depth->right);
+    depth->depth.link(pointcloud->inputDepth);
+    depth->disparity.link(xoutDepth->input);
+    pointcloud->outputPointCloud.link(xout->input);
+    pointcloud->initialConfig.setSparse(true);
 
-            // Wait and check if 'q' pressed
-            if (cv::waitKey(1) == 'q') return 0;
+    auto viewer = std::make_unique<pcl::visualization::PCLVisualizer>("Cloud Viewer");
+    bool first = true;
 
+    dai::Device device(pipeline);
+
+    auto q = device.getOutputQueue("out", 8, false);
+    auto qDepth = device.getOutputQueue("depth", 8, false);
+    long counter = 0;
+    while(true) {
+        std::cout << "Waiting for data" << std::endl;
+        auto depthImg = qDepth->get<dai::ImgFrame>();
+        auto pclMsg = q->get<dai::PointCloudData>();
+        std::cout << "Got data" << std::endl;
+        if(!pclMsg) {
+            std::cout << "No data" << std::endl;
+            continue;
         }
-    } catch (const std::runtime_error& err) {
-        std::cout << err.what() << std::endl;
-    } 
-    
+
+        auto frame = depthImg->getCvFrame();
+        frame.convertTo(frame, CV_8UC1, 255 / depth->initialConfig.getMaxDisparity());
+        cv::imshow("depth", frame);
+        cv::waitKey(1);
+
+        if(pclMsg->getPoints().empty()) {
+            std::cout << "Empty point cloud" << std::endl;
+            continue;
+        }
+        std::cout << "Number of points: " << pclMsg->getPoints().size() << std::endl;
+        std::cout << "Min x: " << pclMsg->getMinX() << std::endl;
+        std::cout << "Min y: " << pclMsg->getMinY() << std::endl;
+        std::cout << "Min z: " << pclMsg->getMinZ() << std::endl;
+        std::cout << "Max x: " << pclMsg->getMaxX() << std::endl;
+        std::cout << "Max y: " << pclMsg->getMaxY() << std::endl;
+        std::cout << "Max z: " << pclMsg->getMaxZ() << std::endl;
+
+//        pcl::PointCloud<pcl::PointXYZ>::Ptr cloud = pclMsg->getPclData();
+//        if(first) {
+//            viewer->addPointCloud<pcl::PointXYZ>(cloud, "cloud");
+//            first = false;
+//        } else {
+//            viewer->updatePointCloud(cloud, "cloud");
+//        }
+
+        viewer->spinOnce(10);
+
+        if(viewer->wasStopped()) {
+            break;
+        }
+    }
+
     return 0;
 }
