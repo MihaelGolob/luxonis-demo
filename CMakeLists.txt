@@ -9,6 +9,6 @@ find_package(OpenCV REQUIRED)
 find_package(PCL REQUIRED)
 
 add_executable(luxonis_demo main.cpp)
-target_link_libraries(luxonis_demo PRIVATE depthai::opencv)
+target_link_libraries(luxonis_demo PRIVATE depthai::opencv depthai::pcl)
 target_link_libraries(luxonis_demo PRIVATE ${OpenCV_LIBS})
 target_link_libraries(luxonis_demo PRIVATE ${PCL_LIBRARIES})
